@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
@@ -73,6 +74,59 @@ describe("DefaultRuntimeBuilder", () => {
 		for (const dir of tempDirs.splice(0)) {
 			rmSync(dir, { recursive: true, force: true });
 		}
+	});
+
+	describe("command time limit (CLINE_COMMAND_TIMEOUT_MS)", () => {
+		const previousTimeout = process.env.CLINE_COMMAND_TIMEOUT_MS;
+		afterEach(() => {
+			if (previousTimeout === undefined) {
+				delete process.env.CLINE_COMMAND_TIMEOUT_MS;
+			} else {
+				process.env.CLINE_COMMAND_TIMEOUT_MS = previousTimeout;
+			}
+		});
+
+		async function runCommandsTool(): Promise<AgentTool> {
+			const runtime = await new DefaultRuntimeBuilder().build({
+				config: makeBaseConfig({ cwd: tmpdir() }),
+			});
+			const tool = runtime.tools.find((t) => t.name === "run_commands");
+			if (!tool) {
+				throw new Error("Expected run_commands to be defined.");
+			}
+			return tool;
+		}
+
+		it("keeps the 30 s default when it is not set", async () => {
+			delete process.env.CLINE_COMMAND_TIMEOUT_MS;
+			const tool = await runCommandsTool();
+			expect(tool.timeoutMs).toBe(60000);
+		});
+
+		it("ignores a value that is not a whole number of milliseconds", async () => {
+			for (const value of ["", "abc", "-5", "1.5", "0", "99999999999"]) {
+				process.env.CLINE_COMMAND_TIMEOUT_MS = value;
+				const tool = await runCommandsTool();
+				expect(tool.timeoutMs).toBe(60000);
+			}
+		});
+
+		it("sets the executor's limit, which kills the command, and a tool limit no shorter", async () => {
+			process.env.CLINE_COMMAND_TIMEOUT_MS = "700";
+			const tool = await runCommandsTool();
+			expect(tool.timeoutMs).toBeGreaterThanOrEqual(2 * 700);
+			const startedAt = Date.now();
+			const result = (await tool.execute(
+				{ commands: ["sleep 31.7"] },
+				{ agentId: "agent-1", conversationId: "conv-1", iteration: 1 },
+			)) as Array<{ success: boolean; error?: string }>;
+			const elapsed = Date.now() - startedAt;
+			expect(elapsed).toBeLessThan(10000);
+			expect(result[0]?.success).toBe(false);
+			expect(String(result[0]?.error)).toContain("timed out after 700ms");
+			const left = spawnSync("pgrep", ["-f", "sleep 31.7"]);
+			expect(left.status).not.toBe(0);
+		}, 20000);
 	});
 
 	it("includes builtin tools when enabled", async () => {
