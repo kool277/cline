@@ -142,6 +142,30 @@ export function createTeamName(): string {
 	return `team-${nanoid(5)}`;
 }
 
+/**
+ * HerLine (kool277/cline, branch herline): the time limit of run_commands, from the environment.
+ *
+ * Upstream runs every command with two 30 s defaults that nothing in the CLI sets: the bash
+ * executor's, which kills the command's process tree, and the run_commands timer's, which only
+ * stops waiting. CLINE_COMMAND_TIMEOUT_MS sets both: the executor's to the value, the tool's a
+ * little longer, so that the executor always acts first and the process tree goes with it.
+ * Unset, or anything but a whole number of milliseconds from 100 to 86400000, keeps upstream's
+ * behaviour.
+ */
+export const COMMAND_TIMEOUT_ENV = "CLINE_COMMAND_TIMEOUT_MS";
+const COMMAND_TIMEOUT_GRACE_MS = 5000;
+
+export function resolveCommandTimeoutMs(
+	raw: string | undefined = process.env[COMMAND_TIMEOUT_ENV],
+): number | undefined {
+	const value = raw?.trim() ?? "";
+	if (!/^[0-9]{1,8}$/.test(value)) {
+		return undefined;
+	}
+	const ms = Number(value);
+	return ms >= 100 && ms <= 86_400_000 ? ms : undefined;
+}
+
 function createBuiltinToolsList(
 	cwd: string,
 	providerId: string,
@@ -162,14 +186,24 @@ function createBuiltinToolsList(
 		toolRoutingRules ?? DEFAULT_MODEL_TOOL_ROUTING_RULES,
 	);
 
+	const commandTimeoutMs = resolveCommandTimeoutMs();
+
 	return filterAvailableTools(
 		createBuiltinTools({
 			cwd,
 			telemetry,
 			executorOptions: {
-				bash: { executionController: runCommandExecutionController },
+				bash: {
+					executionController: runCommandExecutionController,
+					...(commandTimeoutMs !== undefined
+						? { timeoutMs: commandTimeoutMs }
+						: {}),
+				},
 			},
 			...preset,
+			...(commandTimeoutMs !== undefined
+				? { bashTimeoutMs: commandTimeoutMs + COMMAND_TIMEOUT_GRACE_MS }
+				: {}),
 			enableSkills: !!skillsExecutor,
 			...toolRoutingConfig,
 			executors: {
