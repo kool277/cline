@@ -1,3 +1,4 @@
+// Modified by HerLine (kool277/cline, branch herline): CLINE_COMMAND_TIMEOUT_MS sets the command time limit.
 import { supportsModelTool } from "@cline/llms";
 import type {
 	AgentTool,

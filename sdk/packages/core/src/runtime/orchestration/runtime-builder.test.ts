@@ -1,3 +1,4 @@
+// Modified by HerLine (kool277/cline, branch herline): tests for CLINE_COMMAND_TIMEOUT_MS.
 import { spawnSync } from "node:child_process";
 import {
 	existsSync,
